@@ -146,9 +146,23 @@ class RandomOrLearnedSinusoidalPosEmb(nn.Module):
         fouriered = torch.cat((x, fouriered), dim=-1)
         return fouriered
 
+# --- NEW: Step Size Embedding ---
+class StepSizePosEmb(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+    def forward(self, x):
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        if x.ndim == 0: x = x.unsqueeze(0)
+        if x.ndim == 1: x = x.unsqueeze(1)
+        emb = x * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb.view(-1, self.dim)
+
 # building block modules
-
-
 class Block(nn.Module):
     def __init__(self, dim, dim_out, groups=8):
         super().__init__()
@@ -310,8 +324,6 @@ class CrossAttention(nn.Module):
         return self.to_out(out)
         
 # model
-
-
 class Unet(nn.Module):
     def __init__(
         self,
@@ -348,9 +360,8 @@ class Unet(nn.Module):
         block_klass = partial(ResnetBlock, groups=resnet_block_groups)
 
         # time embeddings
-
         time_dim = dim * 4
-
+        
         self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
         if self.random_or_learned_sinusoidal_cond:
@@ -368,8 +379,15 @@ class Unet(nn.Module):
             nn.Linear(time_dim, time_dim)
         )
 
-        # attention
+        # NEW: Step Size Embedding
+        self.step_mlp = nn.Sequential(
+            StepSizePosEmb(dim),
+            nn.Linear(dim, time_dim),
+            nn.GELU(),
+            nn.Linear(time_dim, time_dim)
+        )
 
+        # attention
         num_stages = len(dim_mults)
         full_attn = cast_tuple(full_attn, num_stages)
         attn_heads = cast_tuple(attn_heads, num_stages)
@@ -429,15 +447,18 @@ class Unet(nn.Module):
     def downsample_factor(self):
         return 2 ** (len(self.downs) - 1)
 
-    def forward(self, x, time, codebook=None):
+    def forward(self, x, time, codebook=None, d=None):
         assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]
                    ), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
 
         
         x = self.init_conv(x)
         r = x.clone()
-
         t = self.time_mlp(time)
+
+        # NEW: Inject Step Size
+        if d is not None:
+            t = t + self.step_mlp(d)
 
         h = []
         for block1, block2, attn, downsample in self.downs:
@@ -516,7 +537,74 @@ def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
     return torch.clip(betas, 0, 0.999)
 
 
-class GaussianDiffusion(nn.Module):
+# --- NEW: Shortcut Diffusion Manager ---
+class ShortcutDiffusion(nn.Module):
+    def __init__(self, model, image_size, max_discretization_steps=128, auto_normalize=True, **kwargs):
+        super().__init__()
+        self.model = model
+        self.channels = self.model.channels
+        self.image_size = image_size
+        self.M = max_discretization_steps
+        self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
+        self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
+
+    @property
+    def device(self):
+        return next(self.model.parameters()).device
+
+    def get_step_size(self, batch_size, device):
+        # 75% Flow (d=0), 25% Shortcut (d>0)
+        num_flow = int(batch_size * 0.75)
+        d_flow = torch.zeros(num_flow, device=device)
+        
+        num_shortcut = batch_size - num_flow
+        steps = [2**i for i in range(int(np.log2(self.M)) + 1)]
+        possible_d = torch.tensor([s / self.M for s in steps if s > 0], device=device)
+        
+        d_shortcut = possible_d[torch.randint(0, len(possible_d), (num_shortcut,), device=device)]
+        return torch.cat([d_flow, d_shortcut])
+
+    def forward(self, img_clean, img_foggy, codebook=None):
+        b, c, h, w, device = *img_clean.shape, img_clean.device
+        
+        d = self.get_step_size(b, device)
+        t = torch.rand(b, device=device)
+        
+        mask_shortcut = (d > 0)
+        if mask_shortcut.any():
+            valid_steps = ((1.0 - d[mask_shortcut]) / d[mask_shortcut]).floor()
+            k = torch.rand(mask_shortcut.sum(), device=device) * (valid_steps + 1)
+            t[mask_shortcut] = k.floor() * d[mask_shortcut]
+
+        view_shape = (b, 1, 1, 1)
+        x_t = (1 - t.view(view_shape)) * img_foggy + t.view(view_shape) * img_clean
+        
+        pred_student = self.model(x_t, t, codebook, d=d)
+        
+        with torch.no_grad():
+            target = img_clean - img_foggy
+            
+            if mask_shortcut.any():
+                x_t_s = x_t[mask_shortcut]
+                t_s = t[mask_shortcut]
+                d_s = d[mask_shortcut]
+                x_ref_s = codebook[mask_shortcut] if codebook is not None else None
+                
+                v1 = self.model(x_t_s, t_s, x_ref_s, d=torch.zeros_like(d_s))
+                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)
+                v2 = self.model(x_mid, t_s + d_s/2, x_ref_s, d=torch.zeros_like(d_s))
+                
+                target[mask_shortcut] = 0.5 * (v1 + v2)
+
+        return F.mse_loss(pred_student, target)
+
+    @torch.inference_mode()
+    def sample(self, x_foggy, x_ref=None):
+        b, *_, device = *x_foggy.shape, x_foggy.device
+        t = torch.zeros(b, device=device)
+        d = torch.ones(b, device=device)
+        velocity = self.model(x_foggy, t, x_ref, d=d)
+        return x_foggy + velocity
     def __init__(
         self,
         model,
