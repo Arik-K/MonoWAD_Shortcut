@@ -152,12 +152,24 @@ def main(config="config/config.py", experiment_name="default", world_size=1, loc
                 if 'total_loss' not in training_loss_logger.loss_stats:
                     print(f"\nIn epoch {epoch_num}, iteration:{iter_num}, global_step:{global_step}, total_loss not found in logger.")
                 else:
-                    log_str = 'Epoch: {} | Iteration: {}  | Running loss: {:1.5f} | eta:{} | proposed_loss: {:1.5f}'.format(
-                        epoch_num, iter_num, training_loss_logger.loss_stats['total_loss'].avg,
-                        timer.compute_eta(global_step, len(dataloader_train) * cfg.trainer.max_epochs), training_loss_logger.loss_stats['proposed_loss'].avg)
-                    print(log_str)
-                    writer.add_text("training_log/train", log_str, global_step)
-                    training_loss_logger.log(global_step)
+
+                    # Modified log string to show G_Loss and C_Loss
+                    log_str = 'Epoch: {} | Iter: {} | Total: {:1.5f} | G_Loss: {:1.5f} | C_Loss: {:1.5f} | eta: {}'.format(
+                        epoch_num, iter_num, 
+                        training_loss_logger.loss_stats['total_loss'].avg,
+                        training_loss_logger.loss_stats['l_grounding'].avg, # From your new dictionary
+                        training_loss_logger.loss_stats['l_consistency'].avg, # From your new dictionary
+                        timer.compute_eta(global_step, len(dataloader_train) * cfg.trainer.max_epochs)
+                    )
+
+
+
+                    # log_str = 'Epoch: {} | Iteration: {}  | Running loss: {:1.5f} | eta:{} | proposed_loss: {:1.5f}'.format(
+                    #     epoch_num, iter_num, training_loss_logger.loss_stats['total_loss'].avg,
+                    #     timer.compute_eta(global_step, len(dataloader_train) * cfg.trainer.max_epochs), training_loss_logger.loss_stats['proposed_loss'].avg)
+                    # print(log_str)
+                    # writer.add_text("training_log/train", log_str, global_step)
+                    # training_loss_logger.log(global_step)
 
         if not is_iter_based:
             scheduler.step()

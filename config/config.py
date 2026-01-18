@@ -1,15 +1,103 @@
+# from easydict import EasyDict as edict
+# import os 
+# import numpy as np
+
+# cfg = edict()
+# cfg.obj_types = ['Car']
+# #cfg.obj_types = ['Car', 'Pedestrian', 'Cyclist']
+
+# ## trainer
+# trainer = edict(
+#     gpu = 0,
+#     max_epochs = 40,
+#     disp_iter = 100,
+#     save_iter = 5,
+#     test_iter = 5,
+#     training_func = "train_mono_detection",
+#     test_func = "test_mono_detection",
+#     evaluate_func = "evaluate_kitti_obj",
+#     random_seed = 44,
+# )
+
+# cfg.trainer = trainer
+
+# ## path
+# path = edict()
+# path.data_path = "./data/KITTI/object/training" 
+# path.test_path = "./data/KITTI/object/testing" 
+# path.visualDet3D_path = "./visualDet3D" # The path should point to the inner subfolder
+# path.project_path = "./workdirs" # or other path for pickle files, checkpoints, tensorboard logging and output files.
+# if not os.path.isdir(path.project_path):
+#     os.mkdir(path.project_path)
+# path.project_path = os.path.join(path.project_path, 'MonoWAD')
+# if not os.path.isdir(path.project_path):
+#     os.mkdir(path.project_path)
+
+# path.log_path = os.path.join(path.project_path, "log")
+# if not os.path.isdir(path.log_path):
+#     os.mkdir(path.log_path)
+
+# path.checkpoint_path = os.path.join(path.project_path, "checkpoint")
+# if not os.path.isdir(path.checkpoint_path):
+#     os.mkdir(path.checkpoint_path)
+
+# path.preprocessed_path = os.path.join(path.project_path, "output")
+# if not os.path.isdir(path.preprocessed_path):
+#     os.mkdir(path.preprocessed_path)
+
+# path.train_imdb_path = os.path.join(path.preprocessed_path, "training")
+# if not os.path.isdir(path.train_imdb_path):
+#     os.mkdir(path.train_imdb_path)
+
+# path.val_imdb_path = os.path.join(path.preprocessed_path, "validation")
+# if not os.path.isdir(path.val_imdb_path):
+#     os.mkdir(path.val_imdb_path)
+
+# cfg.path = path
+
+# ## optimizer
+# optimizer = edict(
+#     type_name = 'adam',
+#     keywords = edict(
+#         lr        = 1e-4,
+#         weight_decay = 0,
+#     ),
+#     clipped_gradient_norm = 0.1
+# )
+# cfg.optimizer = optimizer
+# ## scheduler
+# scheduler = edict(
+#     type_name = 'CosineAnnealingLR',
+#     keywords = edict(
+#         T_max     = cfg.trainer.max_epochs,
+#         eta_min   = 5e-6,
+#     )
+# )
+# cfg.scheduler = scheduler
+
+# ## data
+# data = edict(
+#     batch_size = 4,
+#     num_workers = 8,
+#     rgb_shape = (288, 1280, 3),
+#     train_dataset = "KittiMonoDataset",
+#     val_dataset   = "KittiMonoDataset",
+#     test_dataset  = "KittiMonoTestDataset",
+#     train_split_file = os.path.join(cfg.path.visualDet3D_path, 'data', 'kitti', 'chen_split', 'train.txt'),
+#     val_split_file   = os.path.join(cfg.path.visualDet3D_path, 'data', 'kitti', 'chen_split', 'val.txt'),
+# )
+
 from easydict import EasyDict as edict
 import os 
 import numpy as np
 
 cfg = edict()
 cfg.obj_types = ['Car']
-#cfg.obj_types = ['Car', 'Pedestrian', 'Cyclist']
 
 ## trainer
 trainer = edict(
-    gpu = 0,
-    max_epochs = 120,
+    gpu = 0,            # Set to 0, 1, 2, or 3 depending on which GPU you use for this setup
+    max_epochs = 40,    # Reduced from 120; shortcut learning is faster on frozen backbones
     disp_iter = 100,
     save_iter = 5,
     test_iter = 5,
@@ -18,40 +106,27 @@ trainer = edict(
     evaluate_func = "evaluate_kitti_obj",
     random_seed = 44,
 )
-
 cfg.trainer = trainer
 
 ## path
 path = edict()
 path.data_path = "./data/KITTI/object/training" 
 path.test_path = "./data/KITTI/object/testing" 
-path.visualDet3D_path = "./visualDet3D" # The path should point to the inner subfolder
-path.project_path = "./workdirs" # or other path for pickle files, checkpoints, tensorboard logging and output files.
-if not os.path.isdir(path.project_path):
-    os.mkdir(path.project_path)
-path.project_path = os.path.join(path.project_path, 'MonoWAD')
-if not os.path.isdir(path.project_path):
-    os.mkdir(path.project_path)
+path.visualDet3D_path = "./visualDet3D"
+path.project_path = "./workdirs" 
 
+# Clean up path logic
+path.project_path = os.path.join(path.project_path, 'MonoWAD_Shortcut')
+os.makedirs(path.project_path, exist_ok=True)
 path.log_path = os.path.join(path.project_path, "log")
-if not os.path.isdir(path.log_path):
-    os.mkdir(path.log_path)
-
 path.checkpoint_path = os.path.join(path.project_path, "checkpoint")
-if not os.path.isdir(path.checkpoint_path):
-    os.mkdir(path.checkpoint_path)
-
 path.preprocessed_path = os.path.join(path.project_path, "output")
-if not os.path.isdir(path.preprocessed_path):
-    os.mkdir(path.preprocessed_path)
-
 path.train_imdb_path = os.path.join(path.preprocessed_path, "training")
-if not os.path.isdir(path.train_imdb_path):
-    os.mkdir(path.train_imdb_path)
-
 path.val_imdb_path = os.path.join(path.preprocessed_path, "validation")
-if not os.path.isdir(path.val_imdb_path):
-    os.mkdir(path.val_imdb_path)
+
+# Create all directories
+for p in [path.log_path, path.checkpoint_path, path.preprocessed_path, path.train_imdb_path, path.val_imdb_path]:
+    os.makedirs(p, exist_ok=True)
 
 cfg.path = path
 
@@ -59,25 +134,26 @@ cfg.path = path
 optimizer = edict(
     type_name = 'adam',
     keywords = edict(
-        lr        = 1e-4,
-        weight_decay = 0,
+        lr           = 2e-4, # Slightly higher LR to push the new Shortcut module
+        weight_decay = 0.1,  # CRITICAL: High weight decay stabilizes self-consistency
     ),
     clipped_gradient_norm = 0.1
 )
 cfg.optimizer = optimizer
+
 ## scheduler
 scheduler = edict(
     type_name = 'CosineAnnealingLR',
     keywords = edict(
         T_max     = cfg.trainer.max_epochs,
-        eta_min   = 5e-6,
+        eta_min   = 1e-6,
     )
 )
 cfg.scheduler = scheduler
 
 ## data
 data = edict(
-    batch_size = 4,
+    batch_size = 8,     # Increased for A40 (48GB VRAM); helps consistency loss stability
     num_workers = 8,
     rgb_shape = (288, 1280, 3),
     train_dataset = "KittiMonoDataset",

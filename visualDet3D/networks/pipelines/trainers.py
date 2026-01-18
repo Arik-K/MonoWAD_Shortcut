@@ -29,22 +29,59 @@ def train_mono_detection(data, module:nn.Module,
        return
     annotation = compound_annotation(labels, max_length, bbox2d, bbox_3d, cfg.obj_types) #np.arraym, [batch, max_length, 4 + 1 + 7]
 
+    # # Feed to the network
+    # classification_loss, regression_loss, l_proposed ,loss_dict = module(
+    #         [images.cuda().float().contiguous(), 
+    #          images.new(annotation).cuda(),
+    #          P2.cuda(),
+    #          depth.cuda().contiguous(),
+    #          foggy_images.cuda().float().contiguous()]
+    #     )
+
+    # classification_loss = classification_loss.mean()
+    # regression_loss = regression_loss.mean()
+
+    # if not loss_logger is None:
+    #     # Record loss in a average meter
+    #     loss_logger.update(loss_dict)
+    # del loss_dict
+
+
     # Feed to the network
-    classification_loss, regression_loss, l_proposed ,loss_dict = module(
+    # Expecting 5 return values now: cls, reg, shortcut_dict, total_diff_loss, det_loss_dict
+    # classification_loss, regression_loss, shortcut_loss_dict, l_proposed, loss_dict = module(
+    #         [images.cuda().float().contiguous(), 
+    #          images.new(annotation).cuda(),
+    #          P2.cuda(),
+    #          depth.cuda().contiguous(),
+    #          foggy_images.cuda().float().contiguous()]
+    #     )
+    
+    _, _, classification_loss, regression_loss, shortcut_loss_dict, l_proposed, loss_dict = module(
             [images.cuda().float().contiguous(), 
-             images.new(annotation).cuda(),
-             P2.cuda(),
-             depth.cuda().contiguous(),
+             images.new(annotation).cuda(), 
+             P2.cuda(), 
+             depth.cuda().contiguous(), 
              foggy_images.cuda().float().contiguous()]
         )
 
     classification_loss = classification_loss.mean()
     regression_loss = regression_loss.mean()
+    l_proposed = l_proposed.mean() # Ensure scalar
 
     if not loss_logger is None:
-        # Record loss in a average meter
+        # 1. Record standard detection losses (cls, reg, etc.)
         loss_logger.update(loss_dict)
-    del loss_dict
+        
+        # 2. Record our new Shortcut losses for Tensorboard/Console
+        # We use .item() to detach from GPU graph and save memory
+        loss_logger.update(dict(
+            proposed_loss = l_proposed.item(),
+            l_grounding   = shortcut_loss_dict['l_grounding'].item(),
+            l_consistency = shortcut_loss_dict['l_consistency'].item()
+        ))
+        
+    del loss_dict, shortcut_loss_dict
 
     if not optimizer is None:
         loss = classification_loss + regression_loss + l_proposed
