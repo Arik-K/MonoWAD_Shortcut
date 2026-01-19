@@ -608,7 +608,7 @@ class ShortcutDiffusion(nn.Module):
         super().__init__()
         self.model = model
         self.channels = self.model.channels
-        self. image_size = image_size
+        self.image_size = image_size
         self.M = max_discretization_steps
         self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
         self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
@@ -642,7 +642,7 @@ class ShortcutDiffusion(nn.Module):
         if mask_shortcut.any():
             valid_steps = ((1.0 - d[mask_shortcut]) / d[mask_shortcut]).floor()
             k = torch.rand(mask_shortcut.sum(), device=device) * (valid_steps + 1)
-            t[mask_shortcut] = k. floor() * d[mask_shortcut]
+            t[mask_shortcut] = k.floor() * d[mask_shortcut]
 
         # 2. Create x_t (Interpolated state)
         view_shape = (b, 1, 1, 1)
@@ -665,7 +665,7 @@ class ShortcutDiffusion(nn.Module):
                 
                 # Predict two small jumps
                 v1 = self.model(x_t_s, t_s, x_ref_s, d=torch.zeros_like(d_s))
-                x_mid = x_t_s + v1 * (d_s. view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
+                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
                 v2 = self.model(x_mid, t_s + d_s/2, x_ref_s, d=torch.zeros_like(d_s))
                
                 target[mask_shortcut] = 0.5 * (v1 + v2)
@@ -711,7 +711,6 @@ class ShortcutDiffusion(nn.Module):
             x = x + dt * v
         
         return x
-    # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
 
 
 # ---------gaussian diffusion trainer class -------------
