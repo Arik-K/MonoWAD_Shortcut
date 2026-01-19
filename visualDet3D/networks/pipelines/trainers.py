@@ -87,7 +87,7 @@ def train_mono_detection(data, module:nn.Module,
         loss = classification_loss + regression_loss + l_proposed
 
     if bool(loss == 0):
-        del loss, loss_dict
+        del loss
         return
     loss.backward()
     # clip loss norm
