@@ -551,38 +551,54 @@ class Unet(nn.Module):
     def downsample_factor(self):
         return 2 ** (len(self.downs) - 1)
 
-    def forward(self, x, time, codebook=None):
-        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]
+    def forward(self, x, time, codebook=None, d=None):
+        """
+        Args:
+            x: [B, C, H, W] - Input features
+            time: [B] - Timestep in [0, 1]
+            codebook: [B, C, H, W] - Weather codebook conditioning
+            d: [B] - Step size in [0, 1] (default 0 for grounding)
+        """
+        assert all([divisible_by(dim, self.downsample_factor) for dim in x.shape[-2:]]
                    ), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
 
         x = self.init_conv(x)
         r = x.clone()
 
-        t = self.time_mlp(time)
+        # Embed timestep
+        t_emb = self.time_mlp(time)
+        
+        # Embed step size (default to 0 if not provided)
+        if d is None:
+            d = torch.zeros_like(time)
+        d_emb = self.step_mlp(d)
+        
+        # Combine embeddings
+        cond = t_emb + d_emb
 
         h = []
         for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
+            x = block1(x, cond)
             h.append(x)
-            x = block2(x, t)
+            x = block2(x, cond)
             x = attn(x) + x
             h.append(x)
             x = downsample(x)
            
-        x = self.mid_block1(x, t)
+        x = self.mid_block1(x, cond)
         x = self.mid_attn(x, codebook) + x
-        x = self. mid_block2(x, t)
+        x = self.mid_block2(x, cond)
 
         for block1, block2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
-            x = block1(x, t)
+            x = block1(x, cond)
             x = torch.cat((x, h.pop()), dim=1)
-            x = block2(x, t)
+            x = block2(x, cond)
             x = attn(x) + x
             x = upsample(x)
            
         x = torch.cat((x, r), dim=1)
-        x = self.final_res_block(x, t)
+        x = self.final_res_block(x, cond)
         return self.final_conv(x)
 
 # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
@@ -668,16 +684,34 @@ class ShortcutDiffusion(nn.Module):
             'l_grounding': loss_grounding,
             'l_consistency': loss_consistency
         }
-    # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
 
-@torch.inference_mode()
-def sample(self, x_foggy, x_ref=None):
-    b, *_, device = *x_foggy.shape, x_foggy.device
-    t = torch.zeros(b, device=device)
-    d = torch.ones(b, device=device) # Full jump shortcut
-    
-    velocity = self.model(x_foggy, t, x_ref, d=d)
-    return x_foggy + velocity
+    @torch.inference_mode()
+    def sample(self, x_foggy, codebook=None, num_steps=1):
+        """
+        Denoise foggy features using the shortcut model.
+        
+        Args:
+            x_foggy: [B, C, H, W] - Foggy input features
+            codebook: [B, C, H, W] - Weather codebook conditioning
+            num_steps: Number of denoising steps (1, 2, 4, etc.)
+        
+        Returns:
+            x_clean: [B, C, H, W] - Denoised features
+        """
+        b = x_foggy.shape[0]
+        device = x_foggy.device
+        
+        x = x_foggy
+        dt = 1.0 / num_steps
+        d = torch.ones(b, device=device) * dt
+        
+        for i in range(num_steps):
+            t = torch.ones(b, device=device) * (i * dt)
+            v = self.model(x, t, codebook, d=d)
+            x = x + dt * v
+        
+        return x
+    # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
 
 
 # ---------gaussian diffusion trainer class -------------
