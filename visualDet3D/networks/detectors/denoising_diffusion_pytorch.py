@@ -551,38 +551,54 @@ class Unet(nn.Module):
     def downsample_factor(self):
         return 2 ** (len(self.downs) - 1)
 
-    def forward(self, x, time, codebook=None):
-        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]
+    def forward(self, x, time, codebook=None, d=None):
+        """
+        Args:
+            x: [B, C, H, W] - Input features
+            time: [B] - Timestep in [0, 1]
+            codebook: [B, C, H, W] - Weather codebook conditioning
+            d: [B] - Step size in [0, 1] (default 0 for grounding)
+        """
+        assert all([divisible_by(dim, self.downsample_factor) for dim in x.shape[-2:]]
                    ), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
 
         x = self.init_conv(x)
         r = x.clone()
 
-        t = self.time_mlp(time)
+        # Embed timestep
+        t_emb = self.time_mlp(time)
+        
+        # Embed step size (default to 0 if not provided)
+        if d is None:
+            d = torch.zeros_like(time)
+        d_emb = self.step_mlp(d)
+        
+        # Combine embeddings
+        cond = t_emb + d_emb
 
         h = []
         for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
+            x = block1(x, cond)
             h.append(x)
-            x = block2(x, t)
+            x = block2(x, cond)
             x = attn(x) + x
             h.append(x)
             x = downsample(x)
            
-        x = self.mid_block1(x, t)
+        x = self.mid_block1(x, cond)
         x = self.mid_attn(x, codebook) + x
-        x = self. mid_block2(x, t)
+        x = self.mid_block2(x, cond)
 
         for block1, block2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
-            x = block1(x, t)
+            x = block1(x, cond)
             x = torch.cat((x, h.pop()), dim=1)
-            x = block2(x, t)
+            x = block2(x, cond)
             x = attn(x) + x
             x = upsample(x)
            
         x = torch.cat((x, r), dim=1)
-        x = self.final_res_block(x, t)
+        x = self.final_res_block(x, cond)
         return self.final_conv(x)
 
 # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
@@ -592,7 +608,7 @@ class ShortcutDiffusion(nn.Module):
         super().__init__()
         self.model = model
         self.channels = self.model.channels
-        self. image_size = image_size
+        self.image_size = image_size
         self.M = max_discretization_steps
         self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
         self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
@@ -626,7 +642,7 @@ class ShortcutDiffusion(nn.Module):
         if mask_shortcut.any():
             valid_steps = ((1.0 - d[mask_shortcut]) / d[mask_shortcut]).floor()
             k = torch.rand(mask_shortcut.sum(), device=device) * (valid_steps + 1)
-            t[mask_shortcut] = k. floor() * d[mask_shortcut]
+            t[mask_shortcut] = k.floor() * d[mask_shortcut]
 
         # 2. Create x_t (Interpolated state)
         view_shape = (b, 1, 1, 1)
@@ -649,7 +665,7 @@ class ShortcutDiffusion(nn.Module):
                 
                 # Predict two small jumps
                 v1 = self.model(x_t_s, t_s, x_ref_s, d=torch.zeros_like(d_s))
-                x_mid = x_t_s + v1 * (d_s. view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
+                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
                 v2 = self.model(x_mid, t_s + d_s/2, x_ref_s, d=torch.zeros_like(d_s))
                
                 target[mask_shortcut] = 0.5 * (v1 + v2)
@@ -668,16 +684,33 @@ class ShortcutDiffusion(nn.Module):
             'l_grounding': loss_grounding,
             'l_consistency': loss_consistency
         }
-    # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
 
-@torch.inference_mode()
-def sample(self, x_foggy, x_ref=None):
-    b, *_, device = *x_foggy.shape, x_foggy.device
-    t = torch.zeros(b, device=device)
-    d = torch.ones(b, device=device) # Full jump shortcut
-    
-    velocity = self.model(x_foggy, t, x_ref, d=d)
-    return x_foggy + velocity
+    @torch.inference_mode()
+    def sample(self, x_foggy, codebook=None, num_steps=1):
+        """
+        Denoise foggy features using the shortcut model.
+        
+        Args:
+            x_foggy: [B, C, H, W] - Foggy input features
+            codebook: [B, C, H, W] - Weather codebook conditioning
+            num_steps: Number of denoising steps (1, 2, 4, etc.)
+        
+        Returns:
+            x_clean: [B, C, H, W] - Denoised features
+        """
+        b = x_foggy.shape[0]
+        device = x_foggy.device
+        
+        x = x_foggy
+        dt = 1.0 / num_steps
+        d = torch.ones(b, device=device) * dt
+        
+        for i in range(num_steps):
+            t = torch.ones(b, device=device) * (i * dt)
+            v = self.model(x, t, codebook, d=d)
+            x = x + dt * v
+        
+        return x
 
 
 # ---------gaussian diffusion trainer class -------------
