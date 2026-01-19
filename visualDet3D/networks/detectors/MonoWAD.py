@@ -7,7 +7,7 @@ from visualDet3D.networks.backbones.dlaup import DLAUp
 from visualDet3D.networks.detectors.dfe import DepthAwareFE
 from visualDet3D.networks.detectors.dpe import DepthAwarePosEnc
 from visualDet3D.networks.detectors.dtr import DepthAwareTransformer
-from visualDet3D.networks.detectors.denoising_diffusion_pytorch import Unet, ShortcutDiffusion,  ##GaussianDiffusion
+from visualDet3D.networks.detectors.denoising_diffusion_pytorch import Unet, ShortcutDiffusion  ##GaussianDiffusion
 from visualDet3D.networks.detectors.wc import WeatherCodebook
 from visualDet3D.networks.heads.losses import Loss
             
