@@ -604,7 +604,7 @@ class Unet(nn.Module):
 # --- ADDITION 3: Shortcut Diffusion Class (Deterministic ODE) ---
 # This replaces GaussianDiffusion entirely
 class ShortcutDiffusion(nn.Module):
-    def __init__(self, model, image_size, max_discretization_steps=128, auto_normalize=True, **kwargs):
+    def __init__(self, model, image_size, max_discretization_steps=16, auto_normalize=True, **kwargs):
         super().__init__()
         self.model = model
         self.channels = self.model.channels
@@ -664,11 +664,13 @@ class ShortcutDiffusion(nn.Module):
                 x_ref_s = codebook[mask_shortcut] if codebook is not None else None
                 
                 # Predict two small jumps
+                               
                 v1 = self.model(x_t_s, t_s, x_ref_s, d=torch.zeros_like(d_s))
-                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
+                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)
+                x_mid = torch. clamp(x_mid, -4, 4)  # ADD:  Numerical stability
                 v2 = self.model(x_mid, t_s + d_s/2, x_ref_s, d=torch.zeros_like(d_s))
                
-                target[mask_shortcut] = 0.5 * (v1 + v2)
+                target[mask_shortcut] = torch.clamp(0.5 * (v1 + v2), -4, 4)  # ADD: Clamp target
 
         #return F.mse_loss(pred_student, target)
         # Calculate individual MSE for logging
