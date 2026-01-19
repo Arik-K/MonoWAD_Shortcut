@@ -4,6 +4,7 @@ from pathlib import Path
 from random import random
 from functools import partial
 from collections import namedtuple
+import numpy as np
 
 import torch
 from torch import nn, einsum
@@ -495,8 +496,8 @@ class Unet(nn.Module):
             nn.GELU(),
             nn.Linear(time_dim, time_dim)
         )
-        
-        # New Step MLP for conditioning on jump size d
+
+
         self.step_mlp = nn.Sequential(
             StepSizePosEmb(dim),
             nn.Linear(dim, time_dim),
@@ -517,6 +518,7 @@ class Unet(nn.Module):
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(in_out, full_attn, attn_heads, attn_dim_head)):
             is_last = ind >= (num_resolutions - 1)
             attn_klass = FullAttention if layer_full_attn else LinearAttention
+
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim=time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim=time_dim),
@@ -553,7 +555,6 @@ class Unet(nn.Module):
         assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]
                    ), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
 
-        
         x = self.init_conv(x)
         r = x.clone()
 
@@ -563,27 +564,24 @@ class Unet(nn.Module):
         for block1, block2, attn, downsample in self.downs:
             x = block1(x, t)
             h.append(x)
-
             x = block2(x, t)
             x = attn(x) + x
             h.append(x)
-
             x = downsample(x)
+           
         x = self.mid_block1(x, t)
         x = self.mid_attn(x, codebook) + x
-        x = self.mid_block2(x, t)
+        x = self. mid_block2(x, t)
 
         for block1, block2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
             x = block1(x, t)
-
             x = torch.cat((x, h.pop()), dim=1)
             x = block2(x, t)
             x = attn(x) + x
-
             x = upsample(x)
+           
         x = torch.cat((x, r), dim=1)
-
         x = self.final_res_block(x, t)
         return self.final_conv(x)
 
@@ -594,7 +592,7 @@ class ShortcutDiffusion(nn.Module):
         super().__init__()
         self.model = model
         self.channels = self.model.channels
-        self.image_size = image_size
+        self. image_size = image_size
         self.M = max_discretization_steps
         self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
         self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
@@ -606,7 +604,7 @@ class ShortcutDiffusion(nn.Module):
         # 75% for Grounding (d=0), 25% for Shortcut (d > 0)
         num_flow = int(batch_size * 0.75)
         d_flow = torch.zeros(num_flow, device=device)
-        
+       
         num_shortcut = batch_size - num_flow
         # Sample d from powers of 2 for self-consistency grid
         steps = [2**i for i in range(int(np.log2(self.M)) + 1)]
@@ -616,6 +614,7 @@ class ShortcutDiffusion(nn.Module):
         return torch.cat([d_flow, d_shortcut])
 
     def forward(self, img_clean, img_foggy, codebook=None):
+        """Training forward pass"""
         b, c, h, w, device = *img_clean.shape, img_clean.device
         
         # 1. Sample d (Step size) and t (Time point)
@@ -627,7 +626,7 @@ class ShortcutDiffusion(nn.Module):
         if mask_shortcut.any():
             valid_steps = ((1.0 - d[mask_shortcut]) / d[mask_shortcut]).floor()
             k = torch.rand(mask_shortcut.sum(), device=device) * (valid_steps + 1)
-            t[mask_shortcut] = k.floor() * d[mask_shortcut]
+            t[mask_shortcut] = k. floor() * d[mask_shortcut]
 
         # 2. Create x_t (Interpolated state)
         view_shape = (b, 1, 1, 1)
@@ -650,9 +649,9 @@ class ShortcutDiffusion(nn.Module):
                 
                 # Predict two small jumps
                 v1 = self.model(x_t_s, t_s, x_ref_s, d=torch.zeros_like(d_s))
-                x_mid = x_t_s + v1 * (d_s.view(-1, 1, 1, 1) / 2)
+                x_mid = x_t_s + v1 * (d_s. view(-1, 1, 1, 1) / 2)  # ? Integrate velocity
                 v2 = self.model(x_mid, t_s + d_s/2, x_ref_s, d=torch.zeros_like(d_s))
-                
+               
                 target[mask_shortcut] = 0.5 * (v1 + v2)
 
         #return F.mse_loss(pred_student, target)

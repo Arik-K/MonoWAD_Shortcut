@@ -32,7 +32,18 @@ class MonoWAD_3D(nn.Module):
 
     def train_forward(self, left_images, annotations, P2, depth_gt=None, foggy_images=None):
         
-        features, depth, l_proposed = self.mono_core(dict(image=left_images, P2=P2, foggy=foggy_images, training=True))
+        #features, depth, l_proposed = self.mono_core(dict(image=left_images, P2=P2, foggy=foggy_images, training=True))
+
+        # --- FIX: Flexible Unpacking to handle 3 or 4 return values ---
+        outputs = self.mono_core(dict(image=left_images, P2=P2, foggy=foggy_images, training=True))
+        
+        features = outputs[0]
+        depth = outputs[1]
+        l_proposed = outputs[2]
+        
+        # Capture the detailed loss dict if it exists (The 4th item)
+        extra_logs = outputs[3] if len(outputs) > 3 else {}
+        # --------------------------------------------------------------
         
         depth_output = depth
 
@@ -62,7 +73,10 @@ class MonoWAD_3D(nn.Module):
             loss_dict['depth_loss'] = torch.zeros_like(reg_loss)
             
         loss_dict['proposed_loss'] = l_proposed
-        return cls_loss, reg_loss, l_proposed, loss_dict
+        
+        loss_dict.update(extra_logs)
+        
+        return features, depth_output, cls_loss, reg_loss, extra_logs, l_proposed, loss_dict
 
     def test_forward(self, left_images, P2, foggy_images=None, eval_weather_type:str="clear"):
         assert left_images.shape[0] == 1 # we recommmend image batch size = 1 for testing

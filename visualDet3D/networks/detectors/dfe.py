@@ -41,7 +41,7 @@ class dfe_module(nn.Module):
         N, D, H, W = coarse_x.size()
 
         #depth prototype
-        feat_ffm = self.conv1(feat_ffm)
+        feat_ffm = self.conv1(feat_ffm.clone())
         _, C, _, _ = feat_ffm.size()
 
         proj_query = coarse_x.view(N, D, -1)

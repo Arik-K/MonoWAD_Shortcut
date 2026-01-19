@@ -32,7 +32,11 @@ class LossLogger():
         for key in loss_dict:
             if key not in self.loss_stats:
                 self.loss_stats[key] = AverageMeter()
-            self.loss_stats[key].update(loss_dict[key].mean().item())
+            
+            #print(type(loss_dict[key]))
+            #print(loss_dict[key].shape)
+            #print(loss_dict[key])
+            self.loss_stats[key].update(loss_dict[key])
     
     def log(self, step):
         for key in self.loss_stats:

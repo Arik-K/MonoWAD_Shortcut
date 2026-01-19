@@ -8,12 +8,15 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import torch.distributed as dist
+
 from _path_init import *
 from visualDet3D.networks.utils.registry import DETECTOR_DICT, DATASET_DICT, PIPELINE_DICT
 from visualDet3D.networks.utils.utils import get_num_parameters
 from visualDet3D.utils.timer import Timer
 from visualDet3D.utils.utils import LossLogger, cfg_from_file, set_random_seed
 from visualDet3D.networks.optimizers import optimizers, schedulers
+
 
 def main(config="config/config.py", experiment_name="default", world_size=1, local_rank=-1):
     """Main function for the training script.
@@ -59,10 +62,18 @@ def main(config="config/config.py", experiment_name="default", world_size=1, loc
     gpu = min(cfg.trainer.gpu, torch.cuda.device_count() - 1)
     torch.backends.cudnn.benchmark = getattr(cfg.trainer, 'cudnn', False)
     torch.cuda.set_device(gpu)
+    #if is_distributed:
+    #    torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    #print(local_rank)
+    #print(world_size)
     if is_distributed:
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
-    print(local_rank)
-    print(world_size)
+        # Update the variables with the real values from the environment
+        world_size = torch.distributed.get_world_size()
+        if local_rank < 0: # Safety fallback if argument was missing
+            local_rank = torch.distributed.get_rank()
+            
+    print(f"Rank: {local_rank}, World Size: {world_size}")
 
     # Define datasets and dataloader
     dataset_train = DATASET_DICT[cfg.data.train_dataset](cfg)
@@ -156,9 +167,15 @@ def main(config="config/config.py", experiment_name="default", world_size=1, loc
                     # Modified log string to show G_Loss and C_Loss
                     log_str = 'Epoch: {} | Iter: {} | Total: {:1.5f} | G_Loss: {:1.5f} | C_Loss: {:1.5f} | eta: {}'.format(
                         epoch_num, iter_num, 
+
                         training_loss_logger.loss_stats['total_loss'].avg,
                         training_loss_logger.loss_stats['l_grounding'].avg, # From your new dictionary
                         training_loss_logger.loss_stats['l_consistency'].avg, # From your new dictionary
+
+                        float(training_loss_logger.loss_stats['total_loss'].avg),
+                        float(training_loss_logger.loss_stats['l_grounding'].avg), # From your new dictionary
+                        float(training_loss_logger.loss_stats['l_consistency'].avg), # From your new dictionary
+
                         timer.compute_eta(global_step, len(dataloader_train) * cfg.trainer.max_epochs)
                     )
 
@@ -167,9 +184,15 @@ def main(config="config/config.py", experiment_name="default", world_size=1, loc
                     # log_str = 'Epoch: {} | Iteration: {}  | Running loss: {:1.5f} | eta:{} | proposed_loss: {:1.5f}'.format(
                     #     epoch_num, iter_num, training_loss_logger.loss_stats['total_loss'].avg,
                     #     timer.compute_eta(global_step, len(dataloader_train) * cfg.trainer.max_epochs), training_loss_logger.loss_stats['proposed_loss'].avg)
+
                     # print(log_str)
                     # writer.add_text("training_log/train", log_str, global_step)
                     # training_loss_logger.log(global_step)
+
+                    print(log_str)
+                    writer.add_text("training_log/train", log_str, global_step)
+                    training_loss_logger.log(global_step)
+
 
         if not is_iter_based:
             scheduler.step()

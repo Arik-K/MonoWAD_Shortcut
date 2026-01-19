@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import os
 
 from visualDet3D.networks.backbones.dla import dla102
 from visualDet3D.networks.backbones.dlaup import DLAUp
@@ -186,7 +187,6 @@ class MonoWAD(nn.Module):
             #     'l_consistency': diffusion_losses['l_consistency'],
             #     'l_ckr': l_ckr
             # }
-
             # For the detection head during training, use a single sample pass
             with torch.no_grad():
                 x_enhanced = self.diffusion.sample(foggy_feat, weather_reference_feat)
