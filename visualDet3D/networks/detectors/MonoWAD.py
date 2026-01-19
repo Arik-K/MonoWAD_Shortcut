@@ -58,7 +58,7 @@ class MonoWAD(nn.Module):
             self.unet,
             image_size=(36, 160),
             #timesteps=self.num_timesteps,    # number of steps
-            max_discretization_steps=128 # Grid resolution for consistency
+            max_discretization_steps=16 # Grid resolution for consistency
         )
 
     
